@@ -45,4 +45,7 @@ if __name__ == '__main__':
         test_dataset
     )
 
+    # warp_trainer._eval_run_id = '4p7inyfq'
+    # warp_trainer.init_policy_checkpoint = warp_trainer._init_path(2)
+    # warp_trainer._print_event.set()
     warp_trainer.train()

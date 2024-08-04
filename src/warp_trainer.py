@@ -88,6 +88,7 @@ class WARPTrainer:
 
             del slerp_model, init_model
             gc.collect()
+            torch.cuda.empty_cache()
             self._evaluate_slerp_model(iter_idx)
 
     def _train_policy(self, iter_idx: int, run_idx: int):
@@ -125,9 +126,10 @@ class WARPTrainer:
 
     def _litti(self, slerp_model: transformers.PreTrainedModel) -> transformers.PreTrainedModel:
         init_model, _ = self._load_policy(self.init_policy_checkpoint)
-        for init_param, slerp_param in zip(init_model.parameters(), slerp_model.parameters()):
-            init_param = init_param.detach()
-            init_param += self.warp_args.liti_rate * (slerp_param - init_param)
+        for (name, init_param), slerp_param in zip(init_model.named_parameters(), slerp_model.parameters()):
+            if utils.is_lora_layer(name):
+                init_param = init_param.detach()
+                init_param += self.warp_args.liti_rate * (slerp_param - init_param)
         return init_model
 
     def _slerp(self, iter_idx: int) -> transformers.PreTrainedModel:
@@ -190,7 +192,7 @@ class WARPTrainer:
 
         slerp_model, slerp_tokenizer = self._load_policy(self._slerp_path(iter_idx), is_trainable=False, device_map=device)
         slerp_model.eval()
-        sft_model, _ = self._load_policy(self.checkpoints_args.sft_checkpoint, device_map=device)
+        sft_model, _ = self._load_policy(self.checkpoints_args.sft_checkpoint, is_trainable=False, device_map=device)
         sft_model.eval()
         reward_model, reward_tokenizer = self._load_reward(device_map=device)
 
@@ -242,6 +244,7 @@ class WARPTrainer:
             batch_eval_metrics=True,
             include_inputs_for_metrics=True,
             num_train_epochs=0,
+            seed=iter_idx,
             **asdict(self.train_args),
         )
 
