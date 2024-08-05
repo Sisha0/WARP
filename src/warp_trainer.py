@@ -251,6 +251,10 @@ class WARPTrainer:
     def _load_policy(self, path: str, is_trainable: bool = True, device_map: torch.device | None = None) -> peft.peft_model.PeftModelForCausalLM:
         path = utils.get_latest_checkpoint(path)
         policy = peft.AutoPeftModelForCausalLM.from_pretrained(path, is_trainable=is_trainable, device_map=device_map)
+        for module in policy.modules():
+            if isinstance(module, torch.nn.Dropout):
+                module.p = 0
+
         policy.config.use_cache = not self.train_args.gradient_checkpointing
         tokenizer = transformers.AutoTokenizer.from_pretrained(path, padding_side='left')
         return policy, tokenizer

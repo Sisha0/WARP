@@ -3,7 +3,6 @@ import torch.optim.swa_utils as swa
 import transformers
 from collections import defaultdict
 from torch.utils.data import Dataset
-from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from src.configs import WARPArgs
 
 
@@ -59,7 +58,7 @@ class PolicyTrainer(transformers.Trainer):
 
     def compute_loss(self, model: transformers.PreTrainedModel, inputs: transformers.BatchEncoding, return_outputs: bool = False):
         prompt_length = inputs['input_ids'].shape[1]
-        gen_tokens, gen_logprobs = self._generate(model, inputs)
+        gen_tokens, gen_logprobs = self._generate(model, inputs, prompt_length)
 
         policy_logprobs = self._forward(model, gen_tokens, prompt_length)
         with torch.no_grad():
@@ -76,12 +75,24 @@ class PolicyTrainer(transformers.Trainer):
         }
         self.log(batch_metrics)
 
-        loss = -torch.mean(rlhf_reward * policy_logprobs.sum(dim=-1))
+        if self.generation_config.num_return_sequences > 1:
+            loss = self._rloo_loss(rlhf_reward, policy_logprobs.sum(dim=-1))
+        else:
+            loss = -torch.mean(rlhf_reward * policy_logprobs.sum(dim=-1))
+
         return (loss, policy_logprobs) if return_outputs else loss
+
+    def _rloo_loss(self, rlhf_reward: torch.Tensor, policy_logprobs: torch.Tensor) -> torch.Tensor:
+        k = self.generation_config.num_return_sequences
+        rlhf_reward = rlhf_reward.reshape((-1, k))
+        policy_logprobs = policy_logprobs.reshape((-1, k))
+
+        baselines = (rlhf_reward.sum(dim=-1, keepdim=True) - rlhf_reward) / (k - 1)
+        return -torch.mean((rlhf_reward - baselines) * policy_logprobs)
 
     def _compute_metrics(self, pred: transformers.EvalPrediction, compute_result: bool = False) -> dict[str, float]:
         prompt_length = pred.inputs['input_ids'].shape[1]
-        gen_tokens, gen_logprobs = self._generate(self.model, pred.inputs)
+        gen_tokens, gen_logprobs = self._generate(self.model, pred.inputs, prompt_length)
 
         with torch.no_grad():
             ref_logprobs = self._forward(self.ref_policy, gen_tokens, prompt_length)
@@ -100,8 +111,7 @@ class PolicyTrainer(transformers.Trainer):
         self._metrics = defaultdict(list)
         return  final_metrics
 
-    def _generate(self, model: transformers.PreTrainedModel, inputs: transformers.BatchEncoding) -> tuple[torch.Tensor, torch.Tensor]:
-        prompt_length = inputs['input_ids'].shape[1]
+    def _generate(self, model: transformers.PreTrainedModel, inputs: transformers.BatchEncoding, prompt_length: int) -> tuple[torch.Tensor, torch.Tensor]:
         generate_out = model.generate(
             inputs=inputs['input_ids'],
             attention_mask=inputs['attention_mask'],
@@ -130,12 +140,14 @@ class PolicyTrainer(transformers.Trainer):
 
     def _forward(self, model: transformers.PreTrainedModel, gen_tokens: torch.Tensor, prompt_length: int) -> torch.Tensor:
         attention_mask = gen_tokens != self.tokenizer.pad_token_id
-        model_out = model(input_ids=gen_tokens, attention_mask=attention_mask)
-        logprobs = self._process_forward_logits(model_out, gen_tokens, prompt_length)
+        position_ids = attention_mask.cumsum(-1) - 1
+        position_ids.masked_fill_(attention_mask == 0, 1)
+        model_out = model(input_ids=gen_tokens, attention_mask=attention_mask, position_ids=position_ids)
+        logprobs = self._process_forward_logits(model_out.logits, gen_tokens, prompt_length)
         return logprobs
 
-    def _process_forward_logits(self, policy_out: CausalLMOutputWithCrossAttentions, gen_tokens: torch.Tensor, prompt_length: int) -> torch.Tensor:
-        policy_logits = policy_out.logits[:, prompt_length - 1: -1]
+    def _process_forward_logits(self, policy_out: torch.Tensor, gen_tokens: torch.Tensor, prompt_length: int) -> torch.Tensor:
+        policy_logits = policy_out[:, prompt_length - 1: -1]
         generated_pad_mask = gen_tokens[:, prompt_length:] == self.tokenizer.pad_token_id
 
         policy_logits /= (self.generation_config.temperature + self.EPS)

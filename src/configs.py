@@ -64,6 +64,7 @@ class GenerationArgs:
     top_k: int | None = field(default=None, metadata={'help': 'The number of highest probability vocabulary tokens to keep for top-k-filtering.'})
     top_p: float | None = field(default=1.0, metadata={'help': 'Only the smallest set of most probable tokens with probabilities that add up to top_p or higher are kept for generation.'})
     temperature: float | None = field(default=1.0, metadata={'help': 'The value used to modulate the next token probabilities.'})
+    num_return_sequences: int = field(default=1, metadata={'help': 'The number of independently computed returned sequences for each element in the batch'})
 
 
 @dataclass
