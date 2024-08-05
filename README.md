@@ -42,7 +42,7 @@ During the later experiments, we did use the reward model from this [run](https:
 [lvwerra/gpt2-imdb](https://huggingface.co/lvwerra/gpt2-imdb) is used as a reference model. Because we are going to use [LoRA](https://huggingface.co/docs/peft/main/en/conceptual_guides/lora) for training during RLHF stage, we can't use plain lvwerra/gpt2-imdb model (because it has no LoRA layers). So before RLHF stage, we fine-tune the model with LoRA for some iterations:
 
 ```shell
-python -m scripts.train_sft_model --fp16 --per_device_train_batch_size=32
+python -m scripts.train_sft_model --fp16 --per_device_train_batch_size=32 --max_steps=4000
 ```
 
 To see the full list of supported arguments, run:
@@ -60,7 +60,7 @@ During the later experiments, we did use the SFT model from this [run](https://w
 [lvwerra/gpt2-imdb](https://huggingface.co/lvwerra/gpt2-imdb) is fine-tuned with RLHF to generate more positive reviews. To fine-tune the model, run the script:
 
 ```shell
-python -m scripts.train_policy --learning_rate=0.0001 --max_new_tokens=128 --per_device_train_batch_size=16 --per_device_eval_batch_size=16
+python -m scripts.train_policy --learning_rate=0.0001 --max_new_tokens=128 --warmup_steps=20 --num_iterations=3
 ```
 
 To see the full list of supported arguments, run:
@@ -73,7 +73,11 @@ If you did log in to WANDB, the script will log runs into the group specified wi
 
 ### WARP with RLOO
 
-We use [RLOO](https://arxiv.org/abs/2402.14740) as an alternative to plain REINFORCE used in the original paper. This leads to a better KL/Reward trade-off (see [report](./report/report.pdf)). The run is [here](https://wandb.ai/sisha/tk-alignment/groups/warp_test_rloo).
+We use [RLOO](https://arxiv.org/abs/2402.14740) as an alternative to plain REINFORCE used in the original paper. This leads to a better KL/Reward trade-off (see [report](./report/report.pdf)). The run is [here](https://wandb.ai/sisha/tk-alignment/groups/warp_test_rloo). Run the script to test the results:
+
+```shell
+python -m scripts.train_policy --save_folder=warp_rloo --group_name=warp_rloo --learning_rate=0.0001 --max_new_tokens=128 --warmup_steps=20 --per_device_train_batch_size=16 --per_device_train_eval_size=4 --num_return_sequences=4
+```
 
 # Results
 
